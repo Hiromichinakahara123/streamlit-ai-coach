@@ -16,7 +16,7 @@ def init_db():
     """データベースとログテーブルを初期化する"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # 🚨 修正: PRIMARYIFIER -> NOT NULL PRIMARY KEY
+    # 🚨 修正: PRIMARYIFIER を修正し、SQLiteの正しい構文にしました。
     c.execute('''
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -48,13 +48,10 @@ def get_stats():
 # --- Google Gemini AI Configuration ---
 def configure_gemini():
     """Gemini APIキーを設定する"""
-    # 実際の環境では、__api_keyなどのグローバル変数が提供されるか、
-    # st.secretsが使用されます。ここではst.secretsに従います。
     try:
         if 'GEMINI_API_KEY' in st.secrets:
             api_key = st.secrets['GEMINI_API_KEY']
         else:
-            # st.secretsにキーがない場合のフォールバック（環境変数など）
             api_key = os.getenv("GEMINI_API_KEY")
 
         if not api_key:
@@ -190,8 +187,9 @@ def get_ai_coaching_message(df):
     if df.empty:
         return "まだ学習履歴がありません。問題を解いてコーチングを開始しましょう！"
 
-    # 最新の学習記録を取得
-    latest_logs = df.sort_values('timestamp', ascending=False).head(10)[['timestamp', 'topic', 'is_correct']].to_markdown(index=False)
+    # 最新の学習記録を取得し、CSV形式（カンマ区切り）で文字列化
+    # 🚨 修正: to_markdown()の代わりにto_csv()を使用し、tabulate依存を回避
+    latest_logs_csv = df.sort_values('timestamp', ascending=False).head(10)[['timestamp', 'topic', 'is_correct']].to_csv(index=False, sep=',')
     
     # 統計情報の計算
     stats = df.groupby('topic').agg(
@@ -199,10 +197,11 @@ def get_ai_coaching_message(df):
         回答数=('id', 'count')
     )
     stats['正答率'] = stats['正解数'] / stats['回答数']
-    stats_markdown = stats.to_markdown()
+    # 🚨 修正: to_markdown()の代わりにto_csv()を使用し、tabulate依存を回避
+    stats_csv = stats.to_csv(sep=',') 
 
     system_prompt = (
-        "あなたは非常に優秀な学習コーチAIです。提供された学習履歴（Markdown形式のDataFrame）を分析し、"
+        "あなたは非常に優秀な学習コーチAIです。提供された学習履歴（CSV形式のDataFrame）を分析し、"
         "学習者の次の行動を促すための、具体的で励ましになるアドバイスを提供してください。"
         "返答は親しみやすいトーンで、日本語で記述してください。"
         "分析とアドバイスの構造を厳守してください。"
@@ -211,11 +210,11 @@ def get_ai_coaching_message(df):
     user_prompt = f"""
     以下の学習履歴と統計情報に基づいて、学習者へのコーチングメッセージを作成してください。
 
-    【最新の学習ログ（直近10件）】
-    {latest_logs}
+    【最新の学習ログ（直近10件, CSV形式）】
+    {latest_logs_csv}
 
-    【分野別 正答率統計】
-    {stats_markdown}
+    【分野別 正答率統計（CSV形式）】
+    {stats_csv}
     
     【分析とアドバイスの構造】
     1. 全体的な評価と励まし。
@@ -359,7 +358,6 @@ def main():
                         
                         if submitted:
                             # フォームが送信されたら、採点ステージへ移行
-                            # ユーザーの回答を保存する（ここではstateに保存はしないが、必要なら追加）
                             st.session_state.quiz_stage = 'scoring'
                             st.rerun() # ステージ切り替えのため再実行
 
@@ -428,10 +426,10 @@ def main():
                     回答数=('id', 'count')
                 )
                 stats['正答率'] = stats['正解数'] / stats['回答数']
-                stats['正答率'] = stats['正答率'].map('{:.1%}'.format) # パーセント表示に変換
+                stats['正答率_表示'] = stats['正答率'].map('{:.1%}'.format) # パーセント表示に変換
                 
                 # スタイル付きDataFrameの表示
-                st.dataframe(stats)
+                st.dataframe(stats[['正解数', '回答数', '正答率_表示']].rename(columns={'正答率_表示': '正答率'}))
 
             # --- AIコーチング ---
             with col2:
