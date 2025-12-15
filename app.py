@@ -252,6 +252,7 @@ try:
         generation_config={"temperature": 0.2,"max_output_tokens": 800}
     )
     return response.text
+    
 except GoogleAPIError as e:
     return (
             "⚠️ AIコーチングの生成中に一時的なエラーが発生しました。\n\n"
@@ -260,7 +261,7 @@ except GoogleAPIError as e:
             "・ネットワーク遅延\n\n"
             "時間をおいて再度お試しください。\n\n"
             f"（詳細: {e}）"
-        )
+    )
 
 except Exception as e:
     return f"❌ 予期しないエラーが発生しました: {e}"
@@ -396,6 +397,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
