@@ -209,7 +209,9 @@ def get_ai_coaching_message(df):
     model = genai.GenerativeModel("gemini-flash-latest")
 
     prompt = f"""
-以下の学習履歴と統計（CSV形式）を分析し、学習者への具体的なコーチングメッセージを日本語で作成してください。
+以下の学習履歴と統計（CSV形式）を分析し、
+学習者への具体的なコーチングメッセージを
+日本語で作成してください。
 
 【直近ログ】
 {latest_csv}
@@ -220,6 +222,7 @@ def get_ai_coaching_message(df):
 
     response = model.generate_content(prompt)
     return response.text
+
 
 
 
@@ -344,6 +347,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
