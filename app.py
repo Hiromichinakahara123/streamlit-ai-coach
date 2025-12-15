@@ -203,35 +203,41 @@ def get_ai_coaching_message(df):
     if df.empty:
         return "まだ学習履歴がありません。"
 
-    latest_csv = (
-        df.sort_values("timestamp", ascending=False)
-          .head(10)[["timestamp", "topic", "is_correct"]]
-          .to_csv(index=False)
-    )
-
+    # 分野別統計
     stats = df.groupby("topic").agg(
         正解数=("is_correct", "sum"),
         回答数=("id", "count")
     )
     stats["正答率"] = stats["正解数"] / stats["回答数"]
-    stats_csv = stats.to_csv()
-
-    model = genai.GenerativeModel("gemini-flash-latest")
-
+    stats_csv = stats.sort_values("正答率").to_csv()
+    model = genai.GenerativeModel("gemini-1.5-pro")
     prompt = f"""
-以下の学習履歴と統計（CSV形式）を分析し、学習者への具体的なコーチングメッセージを日本語で作成してください。
+あなたは【薬学教育・国家試験指導を専門とする大学教員】です。以下は、ある学生の演習結果（分野別）です。
+この結果から、
+① 学問的に理解が不十分と考えられる概念
+② 学生が陥りやすい誤解の内容
+③ それを克服するための具体的学習方法
+   （どの教科書のどの章をどう読むか、
+    どの計算・図を自分で書くべきか 等）
+④ 国家試験的な視点での注意点
+を **分野ごとに具体的に** 指摘してください。
 
-【直近ログ】
-{latest_csv}
+【重要】
+・正答率が低い分野を重点的に
+・「頑張りましょう」などの抽象表現は禁止
+・学問用語を正確に使う
+・薬学生向けに書く
 
-【分野別統計】
+【分野別成績】
 {stats_csv}
 """
 
-    response = model.generate_content(prompt)
+    response = model.generate_content(
+        prompt,
+        generation_config={"temperature": 0.2}
+    )
+
     return response.text
-
-
 
 
 # =====================================================
@@ -317,7 +323,8 @@ def main():
             if st.button("解答する"):
                 st.session_state.answered = True
                 st.session_state.is_correct = (choice == p["correct"])
-                log_result("AI生成問題", st.session_state.is_correct)
+                log_result(p["topic"], st.session_state.is_correct)
+
 
         # --- 解答後表示 ---
         if st.session_state.answered:
@@ -362,6 +369,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
