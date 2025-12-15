@@ -17,7 +17,7 @@ def init_db():
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARYIFIER NOT NULL PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT,
             topic TEXT,
             is_correct INTEGER
@@ -160,7 +160,9 @@ def generate_ai_problems(pdf_text, num_questions=3):
             
     except Exception as e:
         st.error(f"❌ AI問題生成エラー: {e}")
-        st.text(f"API応答: {response.text if 'response' in locals() else 'N/A'}")
+        # response.textが未定義の可能性があるので、locals()を使ってチェック
+        api_response_text = response.text if 'response' in locals() and hasattr(response, 'text') else 'N/A'
+        st.text(f"API応答: {api_response_text}") 
         return []
 
 def get_ai_coaching_message(df):
@@ -230,6 +232,9 @@ def main():
         st.session_state.coaching_message = "問題を解いてAIコーチングを開始しましょう！"
     if 'pdf_uploaded_key' not in st.session_state:
         st.session_state.pdf_uploaded_key = 0
+    # クイズの進行状態を管理する新しいキー
+    if 'quiz_stage' not in st.session_state:
+        st.session_state.quiz_stage = 'answer_form' # 'answer_form', 'scoring', 'next_button'
 
     st.set_page_config(page_title="AIコーチングアプリ", layout="centered")
     
@@ -272,6 +277,7 @@ def main():
                 if st.button("この資料でAI問題を生成する", key="generate_problems"):
                     st.session_state.ai_problems = None # 既存の問題をリセット
                     st.session_state.ai_idx = 0
+                    st.session_state.quiz_stage = 'answer_form' # ステージをリセット
                     
                     with st.spinner("🚀 AIが問題を作成中..."):
                         problems = generate_ai_problems(st.session_state.pdf_content, num_questions=5)
@@ -294,6 +300,7 @@ def main():
                     st.session_state.file_name = None
                     st.session_state.ai_problems = None
                     st.session_state.ai_idx = 0
+                    st.session_state.quiz_stage = 'answer_form' # ステージをリセット
                     st.session_state.pdf_uploaded_key += 1
                     st.rerun()
 
@@ -315,46 +322,57 @@ def main():
                 st.subheader(f"AI生成問題 {current_index + 1} / {total_problems}")
                 
                 q = problems[current_index]
-                
-                st.markdown(f"**問題:** {q['question']}")
-                
                 key_suffix = f"{current_index}"
-                with st.form(key=f"ai_question_form_{key_suffix}"):
-                    user_answer = st.text_area("あなたの解答を入力してください", key=f"user_answer_{key_suffix}")
-                    submitted = st.form_submit_button("解答をチェック")
 
-                if submitted:
-                    # AIに採点させる（簡易的に正解と一致するかで判断）
-                    if 'is_correct' not in st.session_state or st.session_state.ai_idx != current_index:
+                # 1. 解答フォーム
+                if st.session_state.quiz_stage == 'answer_form':
+                    st.markdown(f"**問題:** {q['question']}")
+                    with st.form(key=f"ai_question_form_{key_suffix}"):
+                        st.text_area("あなたの解答を入力してください", key=f"user_answer_{key_suffix}", height=100)
+                        submitted = st.form_submit_button("解答をチェック")
                         
-                        # 厳密なAI採点ロジックは省略し、今回はユーザーに自己採点させるか、簡易的に一致確認
-                        
-                        # 簡易的な正否判定（今回はヒントとして正解を表示）
-                        st.markdown(f"**💡 正解:** `{q['answer']}`")
+                        if submitted:
+                            # フォームが送信されたら、採点ステージへ移行
+                            st.session_state.quiz_stage = 'scoring'
+                            st.rerun() # ステージ切り替えのため再実行
 
-                        # ユーザーによる採点ボタン
+                # 2. 採点/解説表示ステージ
+                if st.session_state.quiz_stage == 'scoring' or st.session_state.quiz_stage == 'next_button':
+                    st.markdown(f"**問題:** {q['question']}")
+                    
+                    st.info("💡 **解説**")
+                    st.markdown(f"**正解:** `{q['answer']}`")
+                    st.markdown(q['explanation'], unsafe_allow_html=True)
+
+                    # 3. ユーザーによる採点ボタン
+                    if st.session_state.quiz_stage == 'scoring':
+                        st.subheader("自己採点")
                         col_correct, col_incorrect = st.columns(2)
+                        
+                        # 正解ボタン
                         if col_correct.button("⭕ 正解だった", key=f"btn_correct_{key_suffix}"):
-                            st.session_state.is_correct = True
-                            st.success("🎉 正解です！")
+                            st.success("🎉 正解です！学習履歴に記録しました。")
                             log_result("AI生成問題", 1)
+                            st.session_state.quiz_stage = 'next_button'
+                            # Rerunは不要。次のボタンは同じフレームで表示される
+                        
+                        # 不正解ボタン
                         if col_incorrect.button("❌ 不正解だった", key=f"btn_incorrect_{key_suffix}"):
-                            st.session_state.is_correct = False
-                            st.error("❌ 不正解です。")
+                            st.error("❌ 不正解です。学習履歴に記録しました。")
                             log_result("AI生成問題", 0)
-                        
-                        st.info("💡 **解説**")
-                        st.markdown(q['explanation'], unsafe_allow_html=True)
-                        
-                        # 正否判定が終わったら次の問題ボタンを表示
-                        if st.session_state.get('is_correct') is not None:
-                            if st.button("次の問題へ", key=f"ai_next_{key_suffix}"):
-                                st.session_state.ai_idx += 1
-                                st.session_state.is_correct = None # 状態リセット
-                                st.rerun()
+                            st.session_state.quiz_stage = 'next_button'
+                            # Rerunは不要。次のボタンは同じフレームで表示される
+                            
+                    # 4. 次の問題ボタン
+                    if st.session_state.quiz_stage == 'next_button':
+                        if st.button("次の問題へ", key=f"ai_next_{key_suffix}"):
+                            st.session_state.ai_idx += 1
+                            st.session_state.quiz_stage = 'answer_form' # 状態をリセット
+                            st.rerun()
                     
             else:
                 st.success("全てのAI生成問題が終了しました！")
+                st.session_state.quiz_stage = 'answer_form' # ステージをリセット
                 if st.button("新しい問題を生成する"):
                     del st.session_state.ai_problems
                     st.rerun()
