@@ -182,6 +182,7 @@ def generate_ai_problems(text, n=5):
 
     return safe_json_load(response.text)
 
+
 資料:
 {text[:3000]}
 """
@@ -329,6 +330,7 @@ if st.button("解答する"):
 
 if __name__ == "__main__":
     main()
+
 
 
 
