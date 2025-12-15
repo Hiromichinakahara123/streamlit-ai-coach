@@ -260,7 +260,7 @@ def main():
 with tab2:
     if not st.session_state.problems:
         st.info("問題がまだありません")
-        return
+    return
 
     p = st.session_state.problems[st.session_state.idx]
 
@@ -323,6 +323,7 @@ with tab2:
 
 if __name__ == "__main__":
     main()
+
 
 
 
