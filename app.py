@@ -139,7 +139,7 @@ def safe_json_load(text):
         raise
 
 def generate_ai_problems(text, n=5):
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel("gemini-flash-latest")
 
     system_prompt = """
 あなたは大学レベル教材を扱う教育AIです。
@@ -192,7 +192,7 @@ def get_ai_coaching_message(df):
     stats["正答率"] = stats["正解数"] / stats["回答数"]
     stats_csv = stats.to_csv()
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-flash-latest")
 
     prompt = f"""
 以下の学習履歴と統計（CSV形式）を分析し、
@@ -294,5 +294,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
