@@ -21,7 +21,7 @@ import google.generativeai as genai
 # DB
 # =====================================================
 
-DB_FILE = "study_log.db"
+DB_FILE = "pk_study_log.db"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -171,9 +171,15 @@ def generate_ai_problems(text, n=5):
     prompt = f"""
 以下の資料から {n} 問の五肢択一問題を作成してください。
 
+【重要】
+・各問題に必ず「topic（分野名）」を付ける
+・topicは薬剤師国家試験の科目・領域名で簡潔に書く
+  （例：薬物動態学、製剤学、物理薬剤学、薬理学 など）
+
 出力形式:
 [
   {{
+    "topic": "...",
     "question": "...",
     "choices": {{
       "A": "...",
@@ -323,7 +329,9 @@ def main():
             if st.button("解答する"):
                 st.session_state.answered = True
                 st.session_state.is_correct = (choice == p["correct"])
-                log_result(p["topic"], st.session_state.is_correct)
+                topic = p.get("topic", "未分類")
+                log_result(topic, st.session_state.is_correct)
+
 
 
         # --- 解答後表示 ---
@@ -369,6 +377,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
