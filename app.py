@@ -290,12 +290,15 @@ def main():
     # --- 全問終了 ---
         if st.session_state.idx >= len(st.session_state.problems):
             st.success("🎉 すべての問題が終了しました！")
-            st.write(f"正解数: {get_stats()['is_correct'].sum()} / {len(st.session_state.problems)}")
 
-        if st.button("もう一度最初から"):
-            st.session_state.idx = 0
-            st.session_state.answered = False
-            st.rerun()
+            df = get_stats()
+            correct = df["is_correct"].sum() if not df.empty else 0
+            st.write(f"正解数: {correct} / {len(st.session_state.problems)}")
+
+            if st.button("もう一度最初から"):
+                st.session_state.idx = 0
+                st.session_state.answered = False
+                st.rerun()
             return
 
         p = st.session_state.problems[st.session_state.idx]
@@ -359,6 +362,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
