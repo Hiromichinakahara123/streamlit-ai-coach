@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 import json
 import io
@@ -39,12 +40,17 @@ def init_db():
 def log_result(topic, is_correct):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+
+    now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
+
     c.execute(
         "INSERT INTO logs (timestamp, topic, is_correct) VALUES (?, ?, ?)",
-        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), topic, int(is_correct))
+        (now_jst.strftime("%Y-%m-%d %H:%M:%S"), topic, int(is_correct))
     )
+
     conn.commit()
     conn.close()
+
 
 def get_stats():
     conn = sqlite3.connect(DB_FILE)
@@ -324,6 +330,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
