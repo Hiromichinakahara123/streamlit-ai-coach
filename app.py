@@ -257,7 +257,7 @@ def main():
                 st.rerun()
 
        # ---------- 問題 ----------
-    with tab2:
+with tab2:
     if not st.session_state.problems:
         st.info("問題がまだありません")
         return
@@ -300,6 +300,7 @@ def main():
 
 
 
+
     # ---------- コーチング ----------
     with tab3:
         df = get_stats()
@@ -322,6 +323,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
