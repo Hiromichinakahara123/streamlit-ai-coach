@@ -142,26 +142,45 @@ def generate_ai_problems(text, n=5):
     model = genai.GenerativeModel("gemini-flash-latest")
 
     system_prompt = """
-あなたは大学レベル教材を扱う教育AIです。
-提供された資料の内容のみに基づいて問題を作成してください。
+あなたは薬剤師国家試験対策問題を作成する教育AIです。
 
-・表（CSV）は関係性として理解する
-・スライド文章は講義要点として扱う
-・資料外知識は禁止
-・JSONのみを出力する
+【厳守事項】
+・提供資料の内容のみから作問する
+・薬剤師国家試験形式（5択単一選択）とする
+・正解は必ず1つ
+・誤選択肢は知識不足で選びやすいものにする
+・JSONのみ出力
 """
 
     prompt = f"""
-以下の資料から {n} 問の一問一答問題を作成してください。
+以下の資料から {n} 問の五肢択一問題を作成してください。
 
 出力形式:
 [
   {{
     "question": "...",
-    "answer": "...",
+    "choices": {{
+      "A": "...",
+      "B": "...",
+      "C": "...",
+      "D": "...",
+      "E": "..."
+    }},
+    "correct": "A",
     "explanation": "..."
   }}
 ]
+
+資料:
+{text[:3000]}
+"""
+
+    response = model.generate_content(
+        [system_prompt, prompt],
+        generation_config={"temperature": 0.2}
+    )
+
+    return safe_json_load(response.text)
 
 資料:
 {text[:3000]}
@@ -259,18 +278,33 @@ def main():
         st.markdown(f"**正解:** {p['answer']}")
         st.markdown(p["explanation"])
 
-        col1, col2 = st.columns(2)
-        topic = "AI生成問題"
+        p = st.session_state.problems[st.session_state.idx]
 
-        if col1.button("⭕ 正解"):
-            log_result(topic, 1)
-            st.session_state.idx += 1
-            st.rerun()
+st.subheader(f"問題 {st.session_state.idx + 1}")
+st.markdown(p["question"])
 
-        if col2.button("❌ 不正解"):
-            log_result(topic, 0)
-            st.session_state.idx += 1
-            st.rerun()
+choice = st.radio(
+    "選択肢",
+    options=list(p["choices"].keys()),
+    format_func=lambda x: f"{x}: {p['choices'][x]}"
+)
+
+if st.button("解答する"):
+    is_correct = (choice == p["correct"])
+    log_result("AI生成問題", is_correct)
+
+    if is_correct:
+        st.success("正解です 🎉")
+    else:
+        st.error(f"不正解です。正解は {p['correct']} です。")
+
+    st.markdown("### 解説")
+    st.markdown(p["explanation"])
+
+    if st.button("次の問題へ"):
+        st.session_state.idx += 1
+        st.rerun()
+
 
     # ---------- コーチング ----------
     with tab3:
@@ -294,6 +328,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
