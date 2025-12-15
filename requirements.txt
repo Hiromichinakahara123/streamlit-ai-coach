@@ -3,7 +3,9 @@ numpy
 pandas
 google-generativeai
 pypdf
+# 以下のGoogle Drive認証関連は、この方法では不要ですが、残っていても動作に影響はありません
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 tabulate
+3.  GitHubリポジトリにコミットし、Streamlit Cloudで**再デプロイ**（Redeploy）します。
