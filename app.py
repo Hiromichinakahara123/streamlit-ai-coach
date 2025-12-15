@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 import json
 import io
+import google.generativeai as genai
 
 # ---------- File parsing ----------
 import pypdf
@@ -293,4 +294,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
