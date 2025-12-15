@@ -264,10 +264,10 @@ def main():
 
     # ---------- 問題 ----------
     with tab2:
-    # --- 問題がない ---
-    if not st.session_state.problems:
-        st.info("問題がまだありません")
-        return
+        if not st.session_state.problems:
+            st.info("問題がまだありません")
+            return
+
 
     # --- 全問終了 ---
     if st.session_state.idx >= len(st.session_state.problems):
@@ -344,6 +344,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
