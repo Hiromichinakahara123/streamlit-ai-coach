@@ -1,24 +1,23 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-import numpy as np
 from datetime import datetime
 import os
 import json
 import io
 
-# --- File handling ---
+# ---------- File parsing ----------
 import pypdf
 from docx import Document
 from pptx import Presentation
 
-# --- Gemini ---
+# ---------- Gemini ----------
 import google.generativeai as genai
 
 
-# =========================================================
+# =====================================================
 # DB
-# =========================================================
+# =====================================================
 
 DB_FILE = "study_log.db"
 
@@ -53,25 +52,25 @@ def get_stats():
     return df
 
 
-# =========================================================
+# =====================================================
 # Gemini
-# =========================================================
+# =====================================================
 
 def configure_gemini():
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        st.error("Gemini APIキーが設定されていません")
+        st.error("❌ GEMINI_API_KEY が設定されていません")
         return False
     genai.configure(api_key=api_key)
     return True
 
 
-# =========================================================
+# =====================================================
 # File extraction
-# =========================================================
+# =====================================================
 
-def extract_from_pdf(file_bytes):
-    reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+def extract_from_pdf(data):
+    reader = pypdf.PdfReader(io.BytesIO(data))
     texts = []
     for i, page in enumerate(reader.pages):
         text = page.extract_text()
@@ -79,8 +78,8 @@ def extract_from_pdf(file_bytes):
             texts.append(f"【ページ {i+1}】\n{text}")
     return "\n\n".join(texts)
 
-def extract_from_docx(file_bytes):
-    doc = Document(io.BytesIO(file_bytes))
+def extract_from_docx(data):
+    doc = Document(io.BytesIO(data))
     texts = []
     for p in doc.paragraphs:
         if p.style.name.startswith("Heading"):
@@ -89,8 +88,8 @@ def extract_from_docx(file_bytes):
             texts.append(p.text)
     return "\n".join(texts)
 
-def extract_from_xlsx(file_bytes):
-    xl = pd.ExcelFile(io.BytesIO(file_bytes))
+def extract_from_xlsx(data):
+    xl = pd.ExcelFile(io.BytesIO(data))
     texts = []
     for sheet in xl.sheet_names:
         df = xl.parse(sheet)
@@ -98,8 +97,8 @@ def extract_from_xlsx(file_bytes):
         texts.append(df.to_csv(index=False))
     return "\n".join(texts)
 
-def extract_from_pptx(file_bytes):
-    prs = Presentation(io.BytesIO(file_bytes))
+def extract_from_pptx(data):
+    prs = Presentation(io.BytesIO(data))
     texts = []
     for i, slide in enumerate(prs.slides):
         texts.append(f"\n## スライド {i+1}\n")
@@ -109,30 +108,29 @@ def extract_from_pptx(file_bytes):
     return "\n".join(texts)
 
 def extract_text(uploaded_file):
-    suffix = uploaded_file.name.split(".")[-1].lower()
     data = uploaded_file.read()
+    ext = uploaded_file.name.split(".")[-1].lower()
 
-    if suffix == "pdf":
+    if ext == "pdf":
         return extract_from_pdf(data)
-    if suffix == "docx":
+    if ext == "docx":
         return extract_from_docx(data)
-    if suffix == "xlsx":
+    if ext == "xlsx":
         return extract_from_xlsx(data)
-    if suffix == "pptx":
+    if ext == "pptx":
         return extract_from_pptx(data)
 
-    raise ValueError("未対応形式")
+    raise ValueError("未対応のファイル形式です")
 
 
-# =========================================================
+# =====================================================
 # AI problem generation
-# =========================================================
+# =====================================================
 
 def safe_json_load(text):
     try:
         return json.loads(text)
     except Exception:
-        # JSON修復（最低限）
         start = text.find("[")
         end = text.rfind("]")
         if start != -1 and end != -1:
@@ -143,19 +141,19 @@ def generate_ai_problems(text, n=5):
     model = genai.GenerativeModel("gemini-1.5-flash")
 
     system_prompt = """
-あなたは大学レベル教材の教育AIです。
-与えられた資料内容のみに基づいて問題を作成してください。
+あなたは大学レベル教材を扱う教育AIです。
+提供された資料の内容のみに基づいて問題を作成してください。
 
-- 表（CSV形式）は関係性として理解する
-- スライド文章は講義要点として扱う
-- 資料外知識は禁止
-- JSONのみ出力
+・表（CSV）は関係性として理解する
+・スライド文章は講義要点として扱う
+・資料外知識は禁止
+・JSONのみを出力する
 """
 
     prompt = f"""
 以下の資料から {n} 問の一問一答問題を作成してください。
 
-JSON形式:
+出力形式:
 [
   {{
     "question": "...",
@@ -176,13 +174,47 @@ JSON形式:
     return safe_json_load(response.text)
 
 
-# =========================================================
+def get_ai_coaching_message(df):
+    if df.empty:
+        return "まだ学習履歴がありません。"
+
+    latest_csv = (
+        df.sort_values("timestamp", ascending=False)
+          .head(10)[["timestamp", "topic", "is_correct"]]
+          .to_csv(index=False)
+    )
+
+    stats = df.groupby("topic").agg(
+        正解数=("is_correct", "sum"),
+        回答数=("id", "count")
+    )
+    stats["正答率"] = stats["正解数"] / stats["回答数"]
+    stats_csv = stats.to_csv()
+
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    prompt = f"""
+以下の学習履歴と統計（CSV形式）を分析し、
+学習者への具体的なコーチングメッセージを日本語で作成してください。
+
+【直近ログ】
+{latest_csv}
+
+【分野別統計】
+{stats_csv}
+"""
+
+    response = model.generate_content(prompt)
+    return response.text
+
+
+# =====================================================
 # UI
-# =========================================================
+# =====================================================
 
 def main():
-    st.set_page_config("AIコーチング", layout="centered")
-    st.title("📘 AIコーチング学習アプリ")
+    st.set_page_config("AIコーチング学習アプリ", layout="centered")
+    st.title("📚 AIコーチング学習アプリ")
 
     init_db()
     if not configure_gemini():
@@ -195,59 +227,69 @@ def main():
     if "idx" not in st.session_state:
         st.session_state.idx = 0
 
-    tab1, tab2, tab3 = st.tabs(["資料", "問題", "履歴"])
+    tab1, tab2, tab3 = st.tabs(["資料", "問題演習", "コーチング"])
 
-    # -------------------------
+    # ---------- 資料 ----------
     with tab1:
         file = st.file_uploader(
-            "資料アップロード",
+            "資料をアップロード",
             type=["pdf", "docx", "xlsx", "pptx"]
         )
         if file:
-            with st.spinner("解析中..."):
+            with st.spinner("資料解析中..."):
                 st.session_state.text = extract_text(file)
             st.success("資料を読み込みました")
-            if st.button("問題生成"):
+
+            if st.button("AI問題を生成"):
                 st.session_state.problems = generate_ai_problems(st.session_state.text)
                 st.session_state.idx = 0
                 st.rerun()
 
-    # -------------------------
+    # ---------- 問題 ----------
     with tab2:
         if not st.session_state.problems:
-            st.info("問題がありません")
+            st.info("問題がまだありません")
             return
 
         p = st.session_state.problems[st.session_state.idx]
         st.subheader(f"問題 {st.session_state.idx + 1}")
         st.markdown(p["question"])
-
         st.markdown("---")
         st.markdown(f"**正解:** {p['answer']}")
         st.markdown(p["explanation"])
 
         col1, col2 = st.columns(2)
+        topic = "AI生成問題"
+
         if col1.button("⭕ 正解"):
-            log_result("AI問題", 1)
-            st.session_state.idx += 1
-            st.rerun()
-        if col2.button("❌ 不正解"):
-            log_result("AI問題", 0)
+            log_result(topic, 1)
             st.session_state.idx += 1
             st.rerun()
 
-    # -------------------------
+        if col2.button("❌ 不正解"):
+            log_result(topic, 0)
+            st.session_state.idx += 1
+            st.rerun()
+
+    # ---------- コーチング ----------
     with tab3:
         df = get_stats()
         if df.empty:
-            st.info("履歴なし")
+            st.info("学習履歴がありません")
         else:
+            st.subheader("分野別 正答率")
             stats = df.groupby("topic").agg(
                 正解数=("is_correct", "sum"),
                 回答数=("id", "count")
             )
             stats["正答率"] = stats["正解数"] / stats["回答数"]
-            st.dataframe(stats)
+            st.dataframe(stats, width="stretch")
+
+            if st.button("AIコーチングを更新"):
+                with st.spinner("分析中..."):
+                    msg = get_ai_coaching_message(df)
+                st.info(msg)
+
 
 if __name__ == "__main__":
     main()
