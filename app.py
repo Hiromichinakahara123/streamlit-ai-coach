@@ -138,7 +138,8 @@ def extract_text(uploaded_file):
 def safe_json_load(text: str):
     text = text.strip()
     if text.startswith("```"):
-        text = text.split("```")[1]
+        text = re.sub(r"^```.*?\n", "", text)
+        text = text.rstrip("`").strip()
 
     # 最初の [ から最後の ] を抽出
     start = text.find("[")
@@ -147,18 +148,13 @@ def safe_json_load(text: str):
         raise ValueError("JSON配列が見つかりません")
 
     json_text = text[start:end + 1]
- 
-    # ★★★ LaTeX・不正エスケープ対策 ★★★
-    # バックスラッシュを全てエスケープ
-    json_text = json_text.replace("\\", "\\\\")
 
-    # 制御文字除去（念のため）
-    json_text = re.sub(r"[\x00-\x1f]", "", json_text)
-    
     try:
         return json.loads(json_text)
     except json.JSONDecodeError as e:
-        raise ValueError(f"JSON解析失敗: {e}\n\n{text}")
+        raise ValueError(
+            f"JSON解析失敗: {e}\n\n--- Gemini出力 ---\n{text}"
+        )
 
 def generate_ai_problems(text, n=5):
     model = genai.GenerativeModel("gemini-flash-latest")
@@ -172,6 +168,9 @@ def generate_ai_problems(text, n=5):
 ・正解は必ず1つ
 ・誤りの選択肢は知識不足で選びやすいものにする
 ・JSONのみ出力
+・JSONのキーや値に改行を含めない
+・choicesの各選択肢は1文で完結させる
+・説明文は100文字以内
 ・数式は LaTeX や $ 記法を使わず、すべて文章または通常の記号で書く
 ・バックスラッシュ（\）を一切使用しない
 """
@@ -207,7 +206,7 @@ def generate_ai_problems(text, n=5):
 
     response = model.generate_content(
         [system_prompt, prompt],
-        generation_config={"temperature": 0.2}
+        generation_config={"temperature": 0.2,"response_mime_type": "application/json"}
     )
 
     return safe_json_load(response.text)
@@ -397,6 +396,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
