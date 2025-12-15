@@ -134,15 +134,25 @@ def extract_text(uploaded_file):
 # AI problem generation
 # =====================================================
 
-def safe_json_load(text):
+def safe_json_load(text: str):
+    # ```json ``` を除去
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+
+    # 最初の [ から最後の ] を抽出
+    start = text.find("[")
+    end = text.rfind("]")
+
+    if start == -1 or end == -1:
+        raise ValueError("JSON配列が見つかりません")
+
+    json_text = text[start:end + 1]
+
     try:
-        return json.loads(text)
-    except Exception:
-        start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1:
-            return json.loads(text[start:end+1])
-        raise
+        return json.loads(json_text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"JSON解析失敗: {e}\n\n{text}")
 
 def generate_ai_problems(text, n=5):
     model = genai.GenerativeModel("gemini-flash-latest")
@@ -259,9 +269,17 @@ def main():
             st.success("資料を読み込みました")
 
             if st.button("AI問題を生成"):
-                st.session_state.problems = generate_ai_problems(st.session_state.text)
-                st.session_state.idx = 0
-                st.rerun()
+                try:
+                    st.session_state.problems = generate_ai_problems(
+                        st.session_state.text
+                    )
+                    st.session_state.idx = 0
+                    st.success("問題を生成しました")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error("❌ 問題生成に失敗しました")
+                    st.exception(e)
 
     # ---------- 問題 ----------
     with tab2:
@@ -341,6 +359,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
