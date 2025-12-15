@@ -223,47 +223,35 @@ def get_ai_coaching_message(df):
     )
     stats["正答率"] = stats["正解数"] / stats["回答数"]
     stats_csv = stats.sort_values("正答率").to_csv()
+
     model = genai.GenerativeModel("gemini-1.5-pro")
+
     prompt = f"""
 あなたは【薬学教育・国家試験指導を専門とする大学教員】です。以下は、ある学生の演習結果（分野別）です。
 この結果から、
 ① 学問的に理解が不十分と考えられる概念
 ② 学生が陥りやすい誤解の内容
 ③ それを克服するための具体的学習方法
-   （どの教科書のどの章をどう読むか、
-    どの計算・図を自分で書くべきか 等）
 ④ 国家試験的な視点での注意点
 を **分野ごとに具体的に** 指摘してください。
-
-【重要】
-・正答率が低い分野を重点的に
-・「頑張りましょう」などの抽象表現は禁止
-・学問用語を正確に使う
-・薬学生向けに書く
 
 【分野別成績】
 {stats_csv}
 """
 
-try:
-    response = model.generate_content(
-        prompt,
-        generation_config={"temperature": 0.2,"max_output_tokens": 800}
-    )
-    return response.text
-    
-except GoogleAPIError as e:
-    return (
-            "⚠️ AIコーチングの生成中に一時的なエラーが発生しました。\n\n"
-            "原因として以下が考えられます：\n"
-            "・アクセス集中によるAPI制限\n"
-            "・ネットワーク遅延\n\n"
-            "時間をおいて再度お試しください。\n\n"
-            f"（詳細: {e}）"
-    )
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.2,
+                "max_output_tokens": 800
+            }
+        )
+        return response.text
 
-except Exception as e:
-    return f"❌ 予期しないエラーが発生しました: {e}"
+    except Exception as e:
+        return f"❌ AIコーチング生成エラー: {e}"
+
 
 # =====================================================
 # UI
@@ -396,6 +384,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
