@@ -228,15 +228,17 @@ def get_ai_coaching_message(df):
 
     prompt = f"""
 あなたは【薬学教育・国家試験指導を専門とする大学教員】です。以下は、ある学生の演習結果（分野別）です。
+【分野別成績】
+{stats_csv}
 この結果から、
 ① 学問的に理解が不十分と考えられる概念
 ② 学生が陥りやすい誤解の内容
 ③ それを克服するための具体的学習方法
-④ 国家試験的な視点での注意点
-を **分野ごとに具体的に** 指摘してください。
+をそれぞれ明確に書いてください。
 
-【分野別成績】
-{stats_csv}
+【重要】
+・前置きや挨拶文は禁止
+・すぐに分析から書き始める
 """
 
     try:
@@ -244,7 +246,7 @@ def get_ai_coaching_message(df):
             prompt,
             generation_config={
                 "temperature": 0.2,
-                "max_output_tokens": 800
+                "max_output_tokens": 1000
             }
         )
         return response.text
@@ -384,6 +386,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
