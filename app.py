@@ -4,446 +4,250 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import os
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import json
-import pypdf # PDF読み取り用ライブラリ
+import io
 
-# --- データベース設定 ---
-DB_FILE = 'pk_study_log.db'
+# --- File handling ---
+import pypdf
+from docx import Document
+from pptx import Presentation
+
+# --- Gemini ---
+import google.generativeai as genai
+
+
+# =========================================================
+# DB
+# =========================================================
+
+DB_FILE = "study_log.db"
 
 def init_db():
-    """データベースとログテーブルを初期化する"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # 🚨 修正: PRIMARYIFIER を修正し、SQLiteの正しい構文にしました。
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT,
             topic TEXT,
             is_correct INTEGER
         )
-    ''')
+    """)
     conn.commit()
     conn.close()
 
 def log_result(topic, is_correct):
-    """学習結果をデータベースに記録する"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    c.execute('INSERT INTO logs (timestamp, topic, is_correct) VALUES (?, ?, ?)', 
-              (timestamp, topic, int(is_correct)))
+    c.execute(
+        "INSERT INTO logs (timestamp, topic, is_correct) VALUES (?, ?, ?)",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), topic, int(is_correct))
+    )
     conn.commit()
     conn.close()
 
 def get_stats():
-    """全学習ログをDataFrameとして取得する"""
     conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT * FROM logs", conn)
+    df = pd.read_sql("SELECT * FROM logs", conn)
     conn.close()
     return df
 
-# --- Google Gemini AI Configuration ---
+
+# =========================================================
+# Gemini
+# =========================================================
+
 def configure_gemini():
-    """Gemini APIキーを設定する"""
-    try:
-        if 'GEMINI_API_KEY' in st.secrets:
-            api_key = st.secrets['GEMINI_API_KEY']
-        else:
-            api_key = os.getenv("GEMINI_API_KEY")
-
-        if not api_key:
-            st.error("❌ Gemini APIキーが設定されていません。Streamlit Secretsまたは環境変数に 'GEMINI_API_KEY' を設定してください。")
-            return False
-            
-        genai.configure(api_key=api_key)
-        return True
-    except Exception as e:
-        st.error(f"❌ Gemini API設定エラー: {e}")
+    api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        st.error("Gemini APIキーが設定されていません")
         return False
+    genai.configure(api_key=api_key)
+    return True
 
-# --- PDF処理関数 ---
 
-@st.cache_data
-def load_and_process_pdf(uploaded_file):
-    """
-    アップロードされたPDFファイルからテキストを抽出し、セッションステートに保存する。
-    """
-    if uploaded_file is None:
-        return "資料がアップロードされていません。"
-        
-    try:
-        # アップロードされたファイルをメモリ内のバイトストリームとして開く
-        pdf_reader = pypdf.PdfReader(uploaded_file)
-        
-        full_text = ""
-        for page in pdf_reader.pages:
-            # ページからテキストを抽出（エラーが発生する可能性のある部分）
-            text = page.extract_text()
-            if text:
-                full_text += text + "\n\n"
-        
-        full_text = full_text.strip()
-        
-        if len(full_text) < 100:
-            st.warning(f"抽出されたテキストが少なすぎます（{len(full_text)}文字）。PDFがテキストベースであることを確認してください。")
-            return "抽出されたテキストが少なすぎます。"
-            
-        # テキストをセッションステートに保存
-        st.session_state.pdf_content = full_text
-        
-        # ファイル名をセッションステートに保存
-        st.session_state.file_name = uploaded_file.name
-        
-        st.success(f"✅ 資料「{uploaded_file.name}」のテキスト抽出が完了しました。（{len(full_text)}文字）")
-        return full_text
-        
-    except Exception as e:
-        st.error(f"❌ PDF処理エラー: {e}。暗号化されたPDFや画像ベースのPDFは処理できません。")
-        return f"PDF処理中にエラーが発生しました: {e}"
+# =========================================================
+# File extraction
+# =========================================================
 
-# --- AI生成関数 ---
+def extract_from_pdf(file_bytes):
+    reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+    texts = []
+    for i, page in enumerate(reader.pages):
+        text = page.extract_text()
+        if text:
+            texts.append(f"【ページ {i+1}】\n{text}")
+    return "\n\n".join(texts)
 
-def generate_ai_problems(pdf_text, num_questions=5):
-    """PDFテキストを基にAIに問題を生成させる"""
-    if not pdf_text or "資料がアップロードされていません。" in pdf_text or "抽出されたテキストが少なすぎます。" in pdf_text:
-        st.error("問題生成には有効な資料が必要です。")
-        return []
-
-    system_prompt = (
-        "あなたはプロの家庭教師です。提供されたPDF資料の内容を完璧に理解し、"
-        "その資料の内容のみに基づいて、指定された数の問題をJSON形式で生成してください。"
-        "ユーザーの学習を深めるための、難易度が高すぎない一問一答形式にしてください。"
-        "回答には他のテキストや説明は一切含めないでください。JSONオブジェクトのみを出力してください。"
-    )
-    
-    # 効率のため、PDFテキストを先頭3000文字に制限
-    limited_pdf_text = pdf_text[:3000]
-    
-    user_prompt = f"""
-    以下の資料の内容に基づいて、{num_questions}問の問題を生成してください。
-
-    【資料内容（先頭約3000文字）】
-    {limited_pdf_text}
-
-    【出力形式】
-    必ず以下のJSON Schemaに従って出力してください。
-    """
-
-    # JSONスキーマ定義
-    response_schema = {
-        "type": "ARRAY",
-        "description": "資料に基づいた問題のリスト",
-        "items": {
-            "type": "OBJECT",
-            "properties": {
-                "question": {"type": "STRING", "description": "問題文"},
-                "answer": {"type": "STRING", "description": "正解の簡潔な説明"},
-                "explanation": {"type": "STRING", "description": "解説。正解の根拠と関連知識を含める。Markdown形式で記述し、特に重要な用語は**太字**にする。"}
-            },
-            "required": ["question", "answer", "explanation"]
-        }
-    }
-    
-    st.info("🤖 AIが資料を分析し、問題を作成中です... しばらくお待ちください。")
-    
-    try:
-        client = genai.Client()
-        response = client.models.generate_content(
-            model='gemini-2.5-flash-preview-09-2025',
-            contents=[
-                {"role": "user", "parts": [{"text": user_prompt}]}
-            ],
-            config={
-                "system_instruction": system_prompt,
-                "response_mime_type": "application/json",
-                "response_schema": response_schema,
-                "temperature": 0.2
-            }
-        )
-        
-        # JSON文字列をパース
-        problems_list = json.loads(response.text)
-        
-        if problems_list and isinstance(problems_list, list):
-            st.success(f"🎉 AIによる {len(problems_list)} 問の問題生成が完了しました！")
-            return problems_list
+def extract_from_docx(file_bytes):
+    doc = Document(io.BytesIO(file_bytes))
+    texts = []
+    for p in doc.paragraphs:
+        if p.style.name.startswith("Heading"):
+            texts.append(f"\n## {p.text}\n")
         else:
-            st.error("❌ AIからのレスポンス形式が不正です。JSONオブジェクトのリストを期待しましたが、別の形式でした。")
-            st.text_area("AI生の応答:", response.text, height=200)
-            return []
-            
-    except Exception as e:
-        st.error(f"❌ AI問題生成エラー: {e}")
-        # response.textが未定義の可能性があるので、locals()を使ってチェック
-        api_response_text = response.text if 'response' in locals() and hasattr(response, 'text') else 'N/A'
-        st.text_area("デバッグ情報（API応答）:", api_response_text, height=100)
-        return []
+            texts.append(p.text)
+    return "\n".join(texts)
 
-def get_ai_coaching_message(df):
-    """学習履歴に基づいてAIコーチングメッセージを生成する"""
-    if df.empty:
-        return "まだ学習履歴がありません。問題を解いてコーチングを開始しましょう！"
+def extract_from_xlsx(file_bytes):
+    xl = pd.ExcelFile(io.BytesIO(file_bytes))
+    texts = []
+    for sheet in xl.sheet_names:
+        df = xl.parse(sheet)
+        texts.append(f"\n## シート: {sheet}\n")
+        texts.append(df.to_csv(index=False))
+    return "\n".join(texts)
 
-    # 最新の学習記録を取得し、CSV形式（カンマ区切り）で文字列化
-    # 🚨 修正: to_markdown()の代わりにto_csv()を使用し、tabulate依存を回避
-    latest_logs_csv = df.sort_values('timestamp', ascending=False).head(10)[['timestamp', 'topic', 'is_correct']].to_csv(index=False, sep=',')
-    
-    # 統計情報の計算
-    stats = df.groupby('topic').agg(
-        正解数=('is_correct', 'sum'),
-        回答数=('id', 'count')
-    )
-    stats['正答率'] = stats['正解数'] / stats['回答数']
-    # 🚨 修正: to_markdown()の代わりにto_csv()を使用し、tabulate依存を回避
-    stats_csv = stats.to_csv(sep=',') 
+def extract_from_pptx(file_bytes):
+    prs = Presentation(io.BytesIO(file_bytes))
+    texts = []
+    for i, slide in enumerate(prs.slides):
+        texts.append(f"\n## スライド {i+1}\n")
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                texts.append(shape.text)
+    return "\n".join(texts)
 
-    system_prompt = (
-        "あなたは非常に優秀な学習コーチAIです。提供された学習履歴（CSV形式のDataFrame）を分析し、"
-        "学習者の次の行動を促すための、具体的で励ましになるアドバイスを提供してください。"
-        "返答は親しみやすいトーンで、日本語で記述してください。"
-        "分析とアドバイスの構造を厳守してください。"
-    )
-    
-    user_prompt = f"""
-    以下の学習履歴と統計情報に基づいて、学習者へのコーチングメッセージを作成してください。
+def extract_text(uploaded_file):
+    suffix = uploaded_file.name.split(".")[-1].lower()
+    data = uploaded_file.read()
 
-    【最新の学習ログ（直近10件, CSV形式）】
-    {latest_logs_csv}
+    if suffix == "pdf":
+        return extract_from_pdf(data)
+    if suffix == "docx":
+        return extract_from_docx(data)
+    if suffix == "xlsx":
+        return extract_from_xlsx(data)
+    if suffix == "pptx":
+        return extract_from_pptx(data)
 
-    【分野別 正答率統計（CSV形式）】
-    {stats_csv}
-    
-    【分析とアドバイスの構造】
-    1. 全体的な評価と励まし。
-    2. 最も正答率が低い分野（もしあれば）を特定し、その分野を重点的に復習するよう具体的に促す。（正答率が70%以下のものを「要復習」と見なす）
-    3. 次に解くべき問題の種類（例：AI生成問題、特定の分野）を提案する。
-    """
-    
+    raise ValueError("未対応形式")
+
+
+# =========================================================
+# AI problem generation
+# =========================================================
+
+def safe_json_load(text):
     try:
-        client = genai.Client()
-        response = client.models.generate_content(
-            model='gemini-2.5-flash-preview-09-2025',
-            contents=[user_prompt],
-            config={
-                "system_instruction": system_prompt, 
-                "temperature": 0.5
-            }
-        )
-        return response.text
-    except Exception as e:
-        return f"❌ AIコーチング生成エラー: {e}"
+        return json.loads(text)
+    except Exception:
+        # JSON修復（最低限）
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1:
+            return json.loads(text[start:end+1])
+        raise
+
+def generate_ai_problems(text, n=5):
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    system_prompt = """
+あなたは大学レベル教材の教育AIです。
+与えられた資料内容のみに基づいて問題を作成してください。
+
+- 表（CSV形式）は関係性として理解する
+- スライド文章は講義要点として扱う
+- 資料外知識は禁止
+- JSONのみ出力
+"""
+
+    prompt = f"""
+以下の資料から {n} 問の一問一答問題を作成してください。
+
+JSON形式:
+[
+  {{
+    "question": "...",
+    "answer": "...",
+    "explanation": "..."
+  }}
+]
+
+資料:
+{text[:3000]}
+"""
+
+    response = model.generate_content(
+        [system_prompt, prompt],
+        generation_config={"temperature": 0.2}
+    )
+
+    return safe_json_load(response.text)
 
 
-# --- Streamlit UI ---
+# =========================================================
+# UI
+# =========================================================
 
 def main():
-    """メインアプリケーション関数"""
-    
-    # セッションステートの初期化
-    if 'pdf_content' not in st.session_state:
-        st.session_state.pdf_content = None
-    if 'file_name' not in st.session_state:
-        st.session_state.file_name = None
-    if 'ai_problems' not in st.session_state:
-        st.session_state.ai_problems = None
-    if 'ai_idx' not in st.session_state:
-        st.session_state.ai_idx = 0
-    if 'coaching_message' not in st.session_state:
-        st.session_state.coaching_message = "問題を解いてAIコーチングを開始しましょう！"
-    if 'pdf_uploaded_key' not in st.session_state:
-        st.session_state.pdf_uploaded_key = 0
-    # クイズの進行状態を管理する新しいキー
-    if 'quiz_stage' not in st.session_state:
-        st.session_state.quiz_stage = 'answer_form' # 'answer_form', 'scoring', 'next_button'
+    st.set_page_config("AIコーチング", layout="centered")
+    st.title("📘 AIコーチング学習アプリ")
 
-    st.set_page_config(page_title="AIコーチングアプリ", layout="centered")
-    
-    st.title("📚 AIコーチング 学習アプリ")
-    
-    # データベースの初期化
     init_db()
-
-    # Gemini API設定チェック
     if not configure_gemini():
         return
 
-    # 全学習ログの取得（初期表示用）
-    df = get_stats()
+    if "text" not in st.session_state:
+        st.session_state.text = None
+    if "problems" not in st.session_state:
+        st.session_state.problems = []
+    if "idx" not in st.session_state:
+        st.session_state.idx = 0
 
-    # タブの作成
-    tab1, tab2, tab3 = st.tabs(["資料設定", "問題演習", "コーチング"])
+    tab1, tab2, tab3 = st.tabs(["資料", "問題", "履歴"])
 
-    # --- Tab 1: 資料設定 ---
+    # -------------------------
     with tab1:
-        st.header("ステップ1: PDF資料のアップロード")
-
-        # ファイルアップローダーの設置
-        uploaded_file = st.file_uploader(
-            "学習に使いたいPDFファイルをアップロードしてください。", 
-            type="pdf",
-            key=st.session_state.pdf_uploaded_key
+        file = st.file_uploader(
+            "資料アップロード",
+            type=["pdf", "docx", "xlsx", "pptx"]
         )
-        
-        if uploaded_file is not None:
-            # ファイルがアップロードされたら処理
-            # load_and_process_pdfはキャッシュされているため、ファイル内容が変わらない限り再実行されない
-            with st.spinner(f"資料「{uploaded_file.name}」を処理中..."):
-                load_and_process_pdf(uploaded_file)
-            
-            # 処理結果の表示
-            if st.session_state.pdf_content and st.session_state.file_name == uploaded_file.name:
-                st.success(f"現在処理中の資料: **{st.session_state.file_name}**")
-                
-                # 問題生成ボタン
-                if st.button("この資料でAI問題を生成する (5問)", key="generate_problems"):
-                    st.session_state.ai_problems = None # 既存の問題をリセット
-                    st.session_state.ai_idx = 0
-                    st.session_state.quiz_stage = 'answer_form' # ステージをリセット
-                    
-                    # 問題生成
-                    problems = generate_ai_problems(st.session_state.pdf_content, num_questions=5)
-                    st.session_state.ai_problems = problems
-                    
-                    if st.session_state.ai_problems:
-                        # 問題生成が成功したら、アップローダーのキーを更新して再実行（次のアップロードに備える）
-                        st.session_state.pdf_uploaded_key += 1
-                        st.rerun() # タブ2に移動してもらうため再実行
+        if file:
+            with st.spinner("解析中..."):
+                st.session_state.text = extract_text(file)
+            st.success("資料を読み込みました")
+            if st.button("問題生成"):
+                st.session_state.problems = generate_ai_problems(st.session_state.text)
+                st.session_state.idx = 0
+                st.rerun()
 
-            # PDF処理が失敗した場合のメッセージはload_and_process_pdf内で表示済み
-            
-        else:
-            # 既にデータがある場合は表示
-            if st.session_state.pdf_content:
-                st.info(f"現在、資料「**{st.session_state.file_name}**」がセットされています。")
-                if st.button("資料をクリアして新しいファイルをアップロード"):
-                    st.session_state.pdf_content = None
-                    st.session_state.file_name = None
-                    st.session_state.ai_problems = None
-                    st.session_state.ai_idx = 0
-                    st.session_state.quiz_stage = 'answer_form' # ステージをリセット
-                    st.session_state.pdf_uploaded_key += 1
-                    st.rerun()
-
-    # --- Tab 2: 問題演習 ---
+    # -------------------------
     with tab2:
-        st.header("ステップ2: 問題演習")
-        
-        if not st.session_state.pdf_content:
-            st.warning("先に「資料設定」タブで学習資料（PDF）をアップロードしてください。")
-        elif not st.session_state.ai_problems:
-            st.warning("資料がセットされました。「資料設定」タブで「AI問題を生成する」ボタンを押してください。")
-        else:
-            # AI生成問題の表示と解答
-            problems = st.session_state.ai_problems
-            current_index = st.session_state.ai_idx
-            total_problems = len(problems)
+        if not st.session_state.problems:
+            st.info("問題がありません")
+            return
 
-            if current_index < total_problems:
-                st.subheader(f"AI生成問題 {current_index + 1} / {total_problems}")
-                
-                q = problems[current_index]
-                key_suffix = f"{current_index}"
+        p = st.session_state.problems[st.session_state.idx]
+        st.subheader(f"問題 {st.session_state.idx + 1}")
+        st.markdown(p["question"])
 
-                # 1. 解答フォーム
-                # 解答フォームはquiz_stageが'answer_form'の場合のみ表示
-                if st.session_state.quiz_stage == 'answer_form':
-                    st.markdown(f"**問題:** {q['question']}")
-                    # 解答フォーム
-                    with st.form(key=f"ai_question_form_{key_suffix}"):
-                        st.text_area("あなたの解答を入力してください", key=f"user_answer_{key_suffix}", height=100)
-                        submitted = st.form_submit_button("解答をチェック")
-                        
-                        if submitted:
-                            # フォームが送信されたら、採点ステージへ移行
-                            st.session_state.quiz_stage = 'scoring'
-                            st.rerun() # ステージ切り替えのため再実行
+        st.markdown("---")
+        st.markdown(f"**正解:** {p['answer']}")
+        st.markdown(p["explanation"])
 
-                # 2. 採点/解説表示ステージ
-                if st.session_state.quiz_stage in ['scoring', 'next_button']:
-                    st.markdown(f"**問題:** {q['question']}")
-                    
-                    st.info("💡 **解説**")
-                    st.markdown(f"**正解:** `{q['answer']}`")
-                    # Markdown形式で表示
-                    st.markdown(q['explanation']) 
+        col1, col2 = st.columns(2)
+        if col1.button("⭕ 正解"):
+            log_result("AI問題", 1)
+            st.session_state.idx += 1
+            st.rerun()
+        if col2.button("❌ 不正解"):
+            log_result("AI問題", 0)
+            st.session_state.idx += 1
+            st.rerun()
 
-                    # 3. ユーザーによる採点ボタン
-                    if st.session_state.quiz_stage == 'scoring':
-                        st.subheader("自己採点（学習履歴に記録されます）")
-                        col_correct, col_incorrect = st.columns(2)
-                        
-                        # 正解ボタン
-                        if col_correct.button("⭕ 正解だった", key=f"btn_correct_{key_suffix}"):
-                            st.success("🎉 正解です！学習履歴に記録しました。")
-                            log_result("AI生成問題", 1)
-                            st.session_state.quiz_stage = 'next_button'
-                            st.rerun() # ボタンを非表示にするために再実行
-                            
-                        # 不正解ボタン
-                        if col_incorrect.button("❌ 不正解だった", key=f"btn_incorrect_{key_suffix}"):
-                            st.error("❌ 不正解です。学習履歴に記録しました。")
-                            log_result("AI生成問題", 0)
-                            st.session_state.quiz_stage = 'next_button'
-                            st.rerun() # ボタンを非表示にするために再実行
-                            
-                    # 4. 次の問題ボタン
-                    elif st.session_state.quiz_stage == 'next_button':
-                        st.markdown("---")
-                        if st.button("次の問題へ", key=f"ai_next_{key_suffix}"):
-                            st.session_state.ai_idx += 1
-                            st.session_state.quiz_stage = 'answer_form' # 状態をリセット
-                            st.rerun()
-                            
-            else:
-                st.success("全てのAI生成問題が終了しました！")
-                st.session_state.quiz_stage = 'answer_form' # ステージをリセット
-                if st.button("新しい問題を生成する"):
-                    # 問題をリセットし、再生成を促す
-                    st.session_state.ai_problems = None 
-                    st.session_state.ai_idx = 0
-                    st.rerun()
-
-    # --- Tab 3: Stats & Coaching ---
+    # -------------------------
     with tab3:
-        st.header("学習履歴とAIコーチング")
-        
-        # DataFrameの再取得（最新のログを反映）
-        df = get_stats() 
-        
+        df = get_stats()
         if df.empty:
-            st.warning("まだ学習データがありません。「問題演習」タブで問題を解いてみましょう！")
+            st.info("履歴なし")
         else:
-            col1, col2 = st.columns([2, 1])
-            
-            # --- 統計情報 ---
-            with col1:
-                st.subheader("分野別 正答率")
-                stats = df.groupby('topic').agg(
-                    正解数=('is_correct', 'sum'),
-                    回答数=('id', 'count')
-                )
-                stats['正答率'] = stats['正解数'] / stats['回答数']
-                stats['正答率_表示'] = stats['正答率'].map('{:.1%}'.format) # パーセント表示に変換
-                
-                # スタイル付きDataFrameの表示
-                st.dataframe(stats[['正解数', '回答数', '正答率_表示']].rename(columns={'正答率_表示': '正答率'}))
+            stats = df.groupby("topic").agg(
+                正解数=("is_correct", "sum"),
+                回答数=("id", "count")
+            )
+            stats["正答率"] = stats["正解数"] / stats["回答数"]
+            st.dataframe(stats)
 
-            # --- AIコーチング ---
-            with col2:
-                st.subheader("AIコーチングメッセージ")
-                
-                # コーチングメッセージの生成/更新
-                if st.button("AIコーチングを更新", key="update_coaching"):
-                    with st.spinner("AIコーチが分析中..."):
-                        # dfを再取得して最新の情報を渡す
-                        latest_df = get_stats()
-                        st.session_state.coaching_message = get_ai_coaching_message(latest_df)
-
-                st.info(st.session_state.coaching_message)
-                
-    
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
