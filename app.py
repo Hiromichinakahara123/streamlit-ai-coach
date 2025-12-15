@@ -183,18 +183,6 @@ def generate_ai_problems(text, n=5):
     return safe_json_load(response.text)
 
 
-資料:
-{text[:3000]}
-"""
-
-    response = model.generate_content(
-        [system_prompt, prompt],
-        generation_config={"temperature": 0.2}
-    )
-
-    return safe_json_load(response.text)
-
-
 def get_ai_coaching_message(df):
     if df.empty:
         return "まだ学習履歴がありません。"
@@ -266,7 +254,7 @@ def main():
                 st.session_state.idx = 0
                 st.rerun()
 
-    # ---------- 問題 ----------
+       # ---------- 問題 ----------
     with tab2:
         if not st.session_state.problems:
             st.info("問題がまだありません")
@@ -275,36 +263,29 @@ def main():
         p = st.session_state.problems[st.session_state.idx]
         st.subheader(f"問題 {st.session_state.idx + 1}")
         st.markdown(p["question"])
-        st.markdown("---")
-        st.markdown(f"**正解:** {p['answer']}")
-        st.markdown(p["explanation"])
 
-        p = st.session_state.problems[st.session_state.idx]
+        choice = st.radio(
+            "選択肢",
+            options=list(p["choices"].keys()),
+            format_func=lambda x: f"{x}: {p['choices'][x]}"
+        )
 
-st.subheader(f"問題 {st.session_state.idx + 1}")
-st.markdown(p["question"])
+        if st.button("解答する"):
+            is_correct = (choice == p["correct"])
+            log_result("AI生成問題", is_correct)
 
-choice = st.radio(
-    "選択肢",
-    options=list(p["choices"].keys()),
-    format_func=lambda x: f"{x}: {p['choices'][x]}"
-)
+            if is_correct:
+                st.success("正解です 🎉")
+            else:
+                st.error(f"不正解です。正解は {p['correct']} です。")
 
-if st.button("解答する"):
-    is_correct = (choice == p["correct"])
-    log_result("AI生成問題", is_correct)
+            st.markdown("### 解説")
+            st.markdown(p["explanation"])
 
-    if is_correct:
-        st.success("正解です 🎉")
-    else:
-        st.error(f"不正解です。正解は {p['correct']} です。")
+            if st.button("次の問題へ"):
+                st.session_state.idx += 1
+                st.rerun()
 
-    st.markdown("### 解説")
-    st.markdown(p["explanation"])
-
-    if st.button("次の問題へ"):
-        st.session_state.idx += 1
-        st.rerun()
 
 
     # ---------- コーチング ----------
@@ -329,6 +310,7 @@ if st.button("解答する"):
 
 if __name__ == "__main__":
     main()
+
 
 
 
