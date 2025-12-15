@@ -246,13 +246,24 @@ def get_ai_coaching_message(df):
 {stats_csv}
 """
 
+try:
     response = model.generate_content(
         prompt,
-        generation_config={"temperature": 0.2}
+        generation_config={"temperature": 0.2,"max_output_tokens": 800}
     )
-
     return response.text
+except GoogleAPIError as e:
+    return (
+            "⚠️ AIコーチングの生成中に一時的なエラーが発生しました。\n\n"
+            "原因として以下が考えられます：\n"
+            "・アクセス集中によるAPI制限\n"
+            "・ネットワーク遅延\n\n"
+            "時間をおいて再度お試しください。\n\n"
+            f"（詳細: {e}）"
+        )
 
+except Exception as e:
+    return f"❌ 予期しないエラーが発生しました: {e}"
 
 # =====================================================
 # UI
@@ -385,6 +396,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
