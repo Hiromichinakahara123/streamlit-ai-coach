@@ -264,9 +264,23 @@ def main():
 
     # ---------- 問題 ----------
     with tab2:
-        if not st.session_state.problems:
-            st.info("問題がまだありません")
-            return
+    # --- 問題がない ---
+    if not st.session_state.problems:
+        st.info("問題がまだありません")
+        return
+
+    # --- 全問終了 ---
+    if st.session_state.idx >= len(st.session_state.problems):
+        st.success("🎉 すべての問題が終了しました！")
+        st.write(f"正解数: {get_stats()['is_correct'].sum()} / {len(st.session_state.problems)}")
+
+        if st.button("もう一度最初から"):
+            st.session_state.idx = 0
+            st.session_state.answered = False
+            st.rerun()
+
+        return  # ← ★これが超重要
+
 
         p = st.session_state.problems[st.session_state.idx]
 
@@ -330,6 +344,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
