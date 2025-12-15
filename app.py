@@ -209,9 +209,7 @@ def get_ai_coaching_message(df):
     model = genai.GenerativeModel("gemini-flash-latest")
 
     prompt = f"""
-以下の学習履歴と統計（CSV形式）を分析し、
-学習者への具体的なコーチングメッセージを
-日本語で作成してください。
+以下の学習履歴と統計（CSV形式）を分析し、学習者への具体的なコーチングメッセージを日本語で作成してください。
 
 【直近ログ】
 {latest_csv}
@@ -271,22 +269,18 @@ def main():
             st.info("問題がまだありません")
             return
 
-
     # --- 全問終了 ---
-    if st.session_state.idx >= len(st.session_state.problems):
-        st.success("🎉 すべての問題が終了しました！")
-        st.write(f"正解数: {get_stats()['is_correct'].sum()} / {len(st.session_state.problems)}")
+        if st.session_state.idx >= len(st.session_state.problems):
+            st.success("🎉 すべての問題が終了しました！")
+            st.write(f"正解数: {get_stats()['is_correct'].sum()} / {len(st.session_state.problems)}")
 
         if st.button("もう一度最初から"):
             st.session_state.idx = 0
             st.session_state.answered = False
             st.rerun()
-
-        return  # ← ★これが超重要
-
+            return
 
         p = st.session_state.problems[st.session_state.idx]
-
         st.subheader(f"問題 {st.session_state.idx + 1}")
         st.markdown(p["question"])
 
@@ -347,6 +341,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
