@@ -256,46 +256,47 @@ def main():
                 st.session_state.idx = 0
                 st.rerun()
 
-       # ---------- 問題 ----------
-with tab2:
-    if not st.session_state.problems:
-        st.info("問題がまだありません")
-    return
+    # ---------- 問題 ----------
+    with tab2:
+        if not st.session_state.problems:
+            st.info("問題がまだありません")
+            return
 
-    p = st.session_state.problems[st.session_state.idx]
+        p = st.session_state.problems[st.session_state.idx]
 
-    st.subheader(f"問題 {st.session_state.idx + 1}")
-    st.markdown(p["question"])
+        st.subheader(f"問題 {st.session_state.idx + 1}")
+        st.markdown(p["question"])
 
-    choice = st.radio(
-        "選択肢",
-        options=list(p["choices"].keys()),
-        format_func=lambda x: f"{x}: {p['choices'][x]}",
-        key=f"choice_{st.session_state.idx}"
-    )
+        choice = st.radio(
+            "選択肢",
+            options=list(p["choices"].keys()),
+            format_func=lambda x: f"{x}: {p['choices'][x]}",
+            key=f"choice_{st.session_state.idx}"
+        )
 
-    # --- 解答する ---
-    if not st.session_state.answered:
-        if st.button("解答する"):
-            st.session_state.answered = True
-            st.session_state.is_correct = (choice == p["correct"])
-            log_result("AI生成問題", st.session_state.is_correct)
+        # --- 解答する ---
+        if not st.session_state.answered:
+            if st.button("解答する"):
+                st.session_state.answered = True
+                st.session_state.is_correct = (choice == p["correct"])
+                log_result("AI生成問題", st.session_state.is_correct)
 
-    # --- 解答後表示 ---
-    if st.session_state.answered:
-        if st.session_state.is_correct:
-            st.success("正解です 🎉")
-        else:
-            st.error(f"不正解です。正解は {p['correct']} です。")
+        # --- 解答後表示 ---
+        if st.session_state.answered:
+            if st.session_state.is_correct:
+                st.success("正解です 🎉")
+            else:
+                st.error(f"不正解です。正解は {p['correct']} です。")
 
-        st.markdown("### 解説")
-        st.markdown(p["explanation"])
+            st.markdown("### 解説")
+            st.markdown(p["explanation"])
 
-        # --- 次の問題へ ---
-        if st.button("次の問題へ"):
-            st.session_state.idx += 1
-            st.session_state.answered = False
-            st.rerun()
+            # --- 次の問題へ ---
+            if st.button("次の問題へ"):
+                st.session_state.idx += 1
+                st.session_state.answered = False
+                st.rerun()
+
 
 
 
@@ -323,6 +324,7 @@ with tab2:
 
 if __name__ == "__main__":
     main()
+
 
 
 
