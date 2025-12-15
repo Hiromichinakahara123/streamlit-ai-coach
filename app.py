@@ -138,7 +138,7 @@ def safe_json_load(text):
         raise
 
 def generate_ai_problems(text, n=5):
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     system_prompt = """
 あなたは大学レベル教材を扱う教育AIです。
@@ -293,3 +293,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
